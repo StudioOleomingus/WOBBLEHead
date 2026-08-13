@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>UFO Anant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Caveat:wght@600&family=Architects+Daughter&display=swap">
+<style>
+  :root{
+    --page: #d8c9ae;         /* pale brown page */
+    --page-deep: #cdbb9c;
+    --surround: #221d17;     /* outside the square */
+
+    /* swap this for 'Caveat' or 'Architects Daughter' — both are already loaded */
+    --hand: 'Patrick Hand';
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{ background: var(--surround); }
+  body{
+    background: var(--surround);
+    height: 340vh;                 /* scroll runway */
+    overflow-x: hidden;
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- the site itself sits inside a polaroid ---- */
+  #card{
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    background: #fbfaf6;
+    border-radius: 3px;
+    box-shadow:
+      0 38px 90px rgba(0,0,0,.55),
+      0 6px 18px rgba(0,0,0,.32),
+      0 1px 0 rgba(255,255,255,.5) inset;
+  }
+
+  /* the square image window cut into the card */
+  #frame{
+    position: absolute;
+    overflow: hidden;
+    background: var(--page);
+  }
+  /* hairline + inner shadow so the window reads as inset, drawn over the scene */
+  #vignette{
+    position:absolute; inset:0; z-index:7; pointer-events:none;
+    box-shadow:
+      inset 0 0 0 1px rgba(0,0,0,.11),
+      inset 0 3px 16px rgba(0,0,0,.20);
+  }
+
+  #page{
+    position:absolute; inset:0; z-index:0;
+    background:
+      radial-gradient(120% 90% at 50% 45%, #e2d5bd 0%, var(--page) 45%, var(--page-deep) 100%);
+  }
+
+  /* the shared 2750x1536 coordinate space every layer lives in */
+  #stage{
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 2750px; height: 1536px;
+    transform-origin: 50% 50%;
+    z-index: 1;
+    will-change: transform;
+  }
+
+  .layer{
+    position: absolute; top:0; left:0;
+    width: 2750px; height: 1536px;
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+    pointer-events: none;          /* layers are full-canvas — only .hit is clickable */
+  }
+  .layer img{
+    position:absolute; top:0; left:0;
+    width: 2750px; height: 1536px;
+    display:block;
+    pointer-events:none;
+    -webkit-user-drag:none; user-select:none;
+  }
+
+  #headwrap{
+    position:absolute; top:0; left:0;
+    width:2750px; height:1536px;
+    transform-origin: 1348px 748px;   /* the neck */
+    will-change: transform;
+    opacity: 0;
+  }
+  #headwrap img{
+    filter: drop-shadow(0 10px 14px rgba(60,40,20,.35));
+  }
+
+  /* invisible pivot marker — used to read the neck's screen position */
+  #pivot{ position:absolute; left:1348px; top:748px; width:0; height:0; }
+
+  /* ---- handwritten caption, sitting in the polaroid's white band ---- */
+  /* 1416,1230 is the band centre; -10.87deg matches the photo's baked tilt */
+  #caption{
+    position:absolute; left:1416px; top:1230px;
+    width: 640px; height: 0;
+    transform: translate(-50%, 0) rotate(-10.87deg);
+    transform-origin: 50% 50%;
+    pointer-events:none;
+  }
+  #caption span{
+    position:absolute; left:50%; top:0;
+    transform: translate(-50%,-50%);
+    display:inline-block; white-space:nowrap;
+    font-family: var(--hand), 'Ink Free', 'Segoe Script', 'Bradley Hand',
+                 'Comic Sans MS', cursive;
+    font-size: 40px;
+    line-height: 1;
+    color: rgba(28,26,23,.9);
+    will-change: opacity, transform;
+  }
+  #capNew{ opacity: 0; }
+
+  /* hit areas live inside the polaroid layer so they inherit its transform */
+  .hit{ position:absolute; pointer-events:auto; }
+  #hitPolaroid{
+    left:989px; top:401px; width:714px; height:937px;
+    cursor:pointer; touch-action: manipulation;
+  }
+  #hitHead{
+    left:1186px; top:348px; width:326px; height:404px;
+    cursor: grab; display:none; touch-action: none;
+  }
+  #hitHead.on{ display:block; }
+  #hitHead.grabbing{ cursor: grabbing; }
+
+  /* ---- grain / dither ---- */
+  #grain{
+    position:absolute; inset:-64px;   /* overscan so jitter never shows an edge */
+    z-index:3;
+    pointer-events:none;
+    mix-blend-mode: overlay;
+    opacity: .5;
+    background-repeat: repeat;
+  }
+  #grain2{
+    position:absolute; inset:-64px;
+    z-index:4;
+    pointer-events:none;
+    mix-blend-mode: soft-light;
+    opacity: .38;
+    background-repeat: repeat;
+  }
+
+  /* ---- UI ---- */
+  /* the scroll cue lives in the polaroid's white band, not over the scene */
+  #hint{
+    position:absolute; z-index:6; left:0; right:0;
+    text-align:center; color:#8d8578; pointer-events:none;
+    letter-spacing:.28em; text-transform:uppercase; font-size:10px;
+  }
+  #hint .arrow{
+    display:block; margin: 9px auto 0; width:1px; height:20px;
+    background: linear-gradient(#a49b8c, rgba(164,155,140,0));
+    animation: bob 1.9s ease-in-out infinite;
+  }
+  @keyframes bob{ 0%,100%{transform:translateY(0);opacity:.9} 50%{transform:translateY(7px);opacity:.35} }
+
+  #loader{
+    position:fixed; inset:0; z-index:20;
+    background: var(--surround);
+    display:flex; align-items:center; justify-content:center;
+    color:#8a7458; letter-spacing:.3em; text-transform:uppercase; font-size:11px;
+    transition: opacity .6s ease;
+  }
+  #loader.done{ opacity:0; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div id="card">
+<div id="frame">
+  <div id="page"></div>
+
+  <div id="stage">
+    <div class="layer" id="bg">    <img src="BACKGROUND.png" alt=""></div>
+    <div class="layer" id="stuff"> <img src="STUFF.png" alt=""></div>
+
+    <div class="layer" id="polaroid">
+      <img id="mainimg" src="MAIN%20IMAGE.png" alt="">
+      <div id="caption">
+        <span id="capOld">First sighted August 1998</span>
+        <span id="capNew">Happy Birthday!</span>
+      </div>
+      <div id="headwrap"><img src="HEAD.png" alt=""></div>
+      <div id="pivot"></div>
+      <div class="hit" id="hitPolaroid"></div>
+      <div class="hit" id="hitHead"></div>
+    </div>
+
+    <div class="layer" id="mask">  <img src="MASK.png" alt=""></div>
+  </div>
+
+  <div id="grain"></div>
+  <div id="grain2"></div>
+  <div id="vignette"></div>
+</div>
+
+  <div id="hint">Scroll<span class="arrow"></span></div>
+</div>
+
+<div id="loader">Developing…</div>
+
+<script>
+(() => {
+  const CW = 2750, CH = 1536;
+
+  const card     = document.getElementById('card');
+  const frame_   = document.getElementById('frame');
+  const stage    = document.getElementById('stage');
+  const bg       = document.getElementById('bg');
+  const stuff    = document.getElementById('stuff');
+  const mask     = document.getElementById('mask');
+  const polaroid = document.getElementById('polaroid');
+  const mainimg  = document.getElementById('mainimg');
+  const headwrap = document.getElementById('headwrap');
+  const pivotEl  = document.getElementById('pivot');
+  const hitPol   = document.getElementById('hitPolaroid');
+  const hitHead  = document.getElementById('hitHead');
+  const capOld   = document.getElementById('capOld');
+  const capNew   = document.getElementById('capNew');
+  const grain    = document.getElementById('grain');
+  const grain2   = document.getElementById('grain2');
+  const hint     = document.getElementById('hint');
+  const loader   = document.getElementById('loader');
+
+  /* ---------- polaroid card + square window, cover-fitted canvas ---------- */
+  const MARGIN = 0.055;   // white border on left/right/top, as a fraction of card width
+  const BAND   = 0.20;    // the wide bottom band
+  const AR     = 1 - MARGIN + BAND;          // card height / width  (= 1.145)
+
+  let scale = 1, SQ = 0;
+  function fit(){
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const W = Math.min(vw * 0.94, (vh * 0.94) / AR);
+    const H = W * AR;
+    const m = W * MARGIN;
+    SQ = W - 2 * m;                          // square image window
+
+    card.style.width  = W + 'px';
+    card.style.height = H + 'px';
+    frame_.style.left = m + 'px';
+    frame_.style.top  = m + 'px';
+    frame_.style.width  = SQ + 'px';
+    frame_.style.height = SQ + 'px';
+
+    // scroll cue sits centred in the white band below the window
+    hint.style.top = (m + SQ + (H - m - SQ) * 0.30) + 'px';
+
+    scale = Math.max(SQ / CW, SQ / CH);      // cover — crops the canvas sides
+    stage.style.transform = `translate(-50%,-50%) scale(${scale})`;
+  }
+  window.addEventListener('resize', fit, {passive:true});
+  fit();
+
+  /* ---------- grain / dither tiles ---------- */
+  function noiseTile(size, grainAmt, ditherAmt){
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const id  = ctx.createImageData(size, size);
+    const d   = id.data;
+    // 4x4 Bayer matrix gives the noise an ordered, dithered structure
+    const bayer = [0,8,2,10, 12,4,14,6, 3,11,1,9, 15,7,13,5];
+    for (let y = 0; y < size; y++){
+      for (let x = 0; x < size; x++){
+        const i = (y * size + x) * 4;
+        const b = (bayer[(y & 3) * 4 + (x & 3)] / 15 - 0.5) * ditherAmt;
+        const n = (Math.random() - 0.5) * grainAmt;
+        let v = 128 + n + b;
+        v = v < 0 ? 0 : v > 255 ? 255 : v;
+        d[i] = d[i+1] = d[i+2] = v;
+        d[i+3] = 255;
+      }
+    }
+    ctx.putImageData(id, 0, 0);
+    return c.toDataURL();
+  }
+
+  // a few tiles, cycled so the grain crawls instead of sitting still
+  const fineTiles   = [0,1,2,3].map(() => noiseTile(160, 200, 60));
+  const coarseTiles = [0,1,2].map(()  => noiseTile(96,  120, 150));
+  grain.style.backgroundSize  = '160px 160px';
+  grain2.style.backgroundSize = '288px 288px';   // coarse tile blown up = chunkier dither
+
+  /* ---------- keep the caption inside the polaroid whatever font loads ---------- */
+  const CAP_SIZE = 40, CAP_MAX = 460;   // canvas px; polaroid is 553 wide
+  function fitCaption(){
+    [capOld, capNew].forEach(el => {
+      el.style.fontSize = CAP_SIZE + 'px';
+      const w = el.offsetWidth;          // unscaled — offsetWidth ignores transforms
+      if (w > CAP_MAX) el.style.fontSize = (CAP_SIZE * CAP_MAX / w).toFixed(2) + 'px';
+    });
+  }
+  fitCaption();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitCaption);
+
+  /* ---------- easing + helpers ---------- */
+  const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+  const easeInOutCubic = t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+  const smooth = t => t*t*(3 - 2*t);            // scrub-friendly: soft in, soft out
+  const lerp = (a,b,t) => a + (b-a)*t;
+  const seg = (p,a,b) => clamp((p-a)/(b-a), 0, 1);
+
+  /* ---------- scroll progress ---------- */
+  let p = 0;                    // 0 = folder scene, 1 = polaroid on the page
+  function readScroll(){
+    const max = document.body.scrollHeight - window.innerHeight;
+    p = max > 0 ? clamp(window.scrollY / max, 0, 1) : 0;
+  }
+  window.addEventListener('scroll', readScroll, {passive:true});
+  readScroll();
+
+  /* ---------- bobble physics ---------- */
+  let angle = 0, angVel = 0;          // degrees
+  let pop = 0, popVel = 0;            // 0 -> 1
+  let revealed = false;
+  let dragging = false, dragAngle = 0, lastDragAngle = 0, lastDragT = 0;
+
+  const K_ANG = 96,  C_ANG = 6.0;     // stiffer + better damped = tighter wobble
+  const K_POP = 900, C_POP = 40;      // snappy pop-in
+
+  function pivotScreen(){
+    const r = pivotEl.getBoundingClientRect();
+    return {x: r.left, y: r.top};
+  }
+  function angleFromPointer(ev){
+    const pv = pivotScreen();
+    const dx = ev.clientX - pv.x;
+    const dy = ev.clientY - pv.y;           // dy is negative above the neck
+    const a = Math.atan2(dx, -Math.min(dy, -20)) * 180 / Math.PI;
+    return clamp(a * 0.7, -26, 26);
+  }
+
+  function popHead(){
+    if (revealed) return;
+    revealed = true;
+    pop = 0; popVel = 0;
+    angVel = 150;
+    hitHead.classList.add('on');
+    hitPol.style.cursor = 'default';
+  }
+
+  hitPol.addEventListener('pointerdown', e => {
+    if (p < 0.86) return;
+    e.preventDefault();
+    if (!revealed) popHead();
+    else angVel += (Math.random() < .5 ? -1 : 1) * (110 + Math.random()*70);
+  });
+
+  hitHead.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    hitHead.setPointerCapture(e.pointerId);
+    dragging = true;
+    hitHead.classList.add('grabbing');
+    dragAngle = angleFromPointer(e);
+    lastDragAngle = dragAngle;
+    lastDragT = performance.now();
+  });
+  hitHead.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const now = performance.now();
+    dragAngle = angleFromPointer(e);
+    const dt = Math.max((now - lastDragT) / 1000, 1/240);
+    angVel = (dragAngle - lastDragAngle) / dt;
+    lastDragAngle = dragAngle;
+    lastDragT = now;
+    angle = dragAngle;
+  });
+  function endDrag(){
+    if (!dragging) return;
+    dragging = false;
+    hitHead.classList.remove('grabbing');
+    // a plain click (barely moved) gets a friendly nudge instead
+    if (Math.abs(angVel) < 25) angVel = (Math.random() < .5 ? -1 : 1) * (120 + Math.random()*70);
+    angVel = clamp(angVel, -420, 420);
+  }
+  hitHead.addEventListener('pointerup', endDrag);
+  hitHead.addEventListener('pointercancel', endDrag);
+  hitHead.addEventListener('lostpointercapture', endDrag);
+
+  /* ---------- main loop ---------- */
+  let last = performance.now();
+  let gTick = 0;
+
+  function tick(now){
+    let dt = (now - last) / 1000; last = now;
+    dt = Math.min(dt, 1/30);
+
+    /* --- scroll-driven staging --- */
+    const D = 1980;                                  // exit distance in canvas px
+
+    bg.style.transform    = `translate3d(0, ${-D * 1.00 * smooth(seg(p,0,.95))}px, 0)`;
+    stuff.style.transform = `translate3d(0, ${-D * 1.14 * smooth(seg(p,0,.90))}px, 0)`;
+    mask.style.transform  = `translate3d(0, ${-D * 1.30 * smooth(seg(p,0,.84))}px, 0)`;
+
+    // let the table dissolve rather than leaving a hard flying edge
+    bg.style.opacity    = String(1 - smooth(seg(p, .55, .95)));
+    stuff.style.opacity = String(1 - smooth(seg(p, .62, .95)));
+    mask.style.opacity  = String(1 - smooth(seg(p, .55, .88)));
+
+    // polaroid: eases out of the folder and settles dead centre
+    const pp   = easeInOutCubic(seg(p, .06, .90));
+    const lift = smooth(seg(p, .06, .55));
+    const ty   = lerp(0, -101, pp) - 55 * lift * (1 - pp);
+    const tx   = lerp(0, 29, pp);      // 1346 (art centre) -> 1375 (canvas centre)
+    const sc   = lerp(1, 1.20, pp);
+    const rot  = lerp(0, -5.5, pp);
+    polaroid.style.transformOrigin = '1346px 869px';
+    polaroid.style.transform =
+      `translate3d(${tx}px, ${ty}px, 0) rotate(${rot}deg) scale(${sc})`;
+
+    mainimg.style.filter =
+      `drop-shadow(0 ${18*pp}px ${30*pp}px rgba(70,52,30,${0.34*pp}))`;
+
+    /* --- head springs --- */
+    if (revealed){
+      const aP = -K_POP * (pop - 1) - C_POP * popVel;
+      popVel += aP * dt; pop += popVel * dt;
+
+      if (!dragging){
+        const aA = -K_ANG * angle - C_ANG * angVel;
+        angVel += aA * dt; angle += angVel * dt;
+      }
+
+      const grow = 1 + 0.46 * clamp(pop, 0, 2);
+      headwrap.style.opacity = String(clamp(pop * 3.0, 0, 1));
+      headwrap.style.transform =
+        `rotate(${angle}deg) scale(${grow}) translateY(${-6 * clamp(pop,0,2)}px)`;
+
+      /* caption swaps in lockstep with the head — same spring, no delay */
+      const ct = clamp(pop * 2.4, 0, 1);
+      capOld.style.opacity = String(1 - ct);
+      capNew.style.opacity = String(ct);
+      capNew.style.transform =
+        `translate(-50%,-50%) scale(${0.86 + 0.14 * clamp(pop, 0, 1.2)})`;
+    }
+
+    /* --- grain: swap tile + jitter offset so it crawls --- */
+    gTick++;
+    if (gTick % 2 === 0){
+      grain.style.backgroundImage =
+        `url(${fineTiles[(gTick >> 1) % fineTiles.length]})`;
+      grain.style.backgroundPosition =
+        `${(Math.random()*160)|0}px ${(Math.random()*160)|0}px`;
+    }
+    if (gTick % 5 === 0){
+      grain2.style.backgroundImage =
+        `url(${coarseTiles[(gTick / 5 | 0) % coarseTiles.length]})`;
+      grain2.style.backgroundPosition =
+        `${(Math.random()*288)|0}px ${(Math.random()*288)|0}px`;
+    }
+
+    /* --- ui --- */
+    hint.style.opacity = String(clamp(1 - p * 5, 0, 1));
+
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  /* ---------- preload ---------- */
+  const srcs = ['BACKGROUND.png','STUFF.png','MASK.png','MAIN%20IMAGE.png','HEAD.png'];
+  let loaded = 0;
+  srcs.forEach(s => {
+    const i = new Image();
+    i.onload = i.onerror = () => {
+      if (++loaded === srcs.length){
+        loader.classList.add('done');
+        setTimeout(() => loader.remove(), 700);
+      }
+    };
+    i.src = s;
+  });
+  setTimeout(() => loader.classList.add('done'), 9000);
+})();
+</script>
+</body>
+</html>
