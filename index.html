@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comic 02 — scroll experiment (live)</title>
+<style>
+  :root{
+    /* ---- knobs. everything below is in stage design units (2048 x 895) ---- */
+    --frame: 4px;          /* white frame around every image */
+    --paper: #0e1113;      /* surround colour */
+    --ink: #ffffff;        /* frame colour */
+
+    /* Actions set 03 — the two square panels.
+       Set as per the reference mockup: large squares hugging the left edge,
+       the lower one running off the bottom of the frame.
+       For two fully visible squares instead, use:
+       --sq-size:428px; --sq-top:8px; --sq-bot:459px;  */
+    --sq-size: 648px;
+    --sq-x:      22px;
+    --sq-top:     6px;     /* y of the upper square */
+    --sq-bot:   666px;     /* y of the lower square */
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:auto}
+  body{
+    background:var(--paper);
+    overflow-x:hidden;
+    font:400 13px/1.4 ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    color:#8a9499;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  #track{position:relative;width:100%}
+
+  #viewport{
+    position:sticky; top:0;
+    height:100vh;
+    overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  /* the stage is authored at 2048 x 895 design units and scaled to fit */
+  #stage{
+    position:relative;
+    flex:0 0 auto;                 /* never let flex shrink the design box */
+    width:2048px; height:895px;
+    min-width:2048px; min-height:895px;
+    transform-origin:50% 50%;
+    overflow:hidden;
+    will-change:transform;
+    /* the stage is always fully covered; white here just means any sub-pixel
+       hairline between two panels reads as gutter rather than as a hole */
+    background:var(--ink);
+  }
+
+  /* ---- background panels : window that crops, image pinned to its own left edge ---- */
+  .panel{
+    position:absolute; top:0; height:100%;
+    overflow:hidden;
+    border:var(--frame) solid var(--ink);
+    will-change:width,transform;
+    background:var(--paper);
+  }
+  /* the image is locked to full-stage size no matter how narrow its window
+     gets, and pinned to the window's own left edge — so it is cropped and
+     carried along, never scaled. */
+  .panel > img{
+    position:absolute; left:0; top:0;
+    width:calc(2048px - 2 * var(--frame));
+    height:calc(895px - 2 * var(--frame));
+    max-width:none;
+    display:block;
+  }
+
+  /* ---- Actions set 03 : square overlay panels ---- */
+  .sq{
+    position:absolute;
+    left:var(--sq-x); width:var(--sq-size); height:var(--sq-size);
+    border:var(--frame) solid var(--ink);
+    overflow:hidden;
+    background:var(--paper);
+    opacity:0;
+    will-change:opacity;
+  }
+  #sqTop{top:var(--sq-top); z-index:40}
+  #sqBot{top:var(--sq-bot); z-index:39}
+  /* fixed size, so that closing the square crops it instead of squashing it */
+  .sq > img{
+    position:absolute; left:0; top:0;
+    width:calc(var(--sq-size) - 2 * var(--frame));
+    height:calc(var(--sq-size) - 2 * var(--frame));
+    object-fit:cover; display:block;
+    opacity:0;
+  }
+  .sq > img.on{opacity:1}
+
+  /* ---- caption boxes ---- */
+  /* outer box is the shutter (its width animates shut); inner keeps its own
+     width so the text crops rather than reflowing */
+  .cap{
+    position:absolute; overflow:hidden;
+    z-index:50; opacity:0;
+    will-change:opacity,width;
+  }
+  .cap > div{
+    background:#f2efe5;
+    color:#1b2530;
+    font-family:"Segoe UI",-apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif;
+    font-size:20px; line-height:1.42; letter-spacing:.005em;
+    padding:9px 20px 9px 48px;
+  }
+  .cap i{font-style:italic}
+
+  /* ---- the B1 that springs back in from the right at the end ----
+     Its image is rendered ~6.5% oversize so that the spring can overshoot
+     past the left edge without ever uncovering the right edge of the stage.
+     Everything else on the page keeps images at exact stage size. */
+  #pRet{z-index:20; visibility:hidden}
+  #pRet > img{ width:2210px; height:966px; top:-40px; left:0 }
+  /* B7 is towed in on a plain ease with no overshoot, so it needs no oversize */
+  #pB7{z-index:21; visibility:hidden; width:2048px; transform:translate3d(2048px,0,0)}
+
+  /* ---- chrome ---- */
+  #hint{
+    position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+    letter-spacing:.18em; text-transform:uppercase; font-size:10px;
+    pointer-events:none; transition:opacity .4s ease; z-index:60;
+  }
+  #bar{
+    position:fixed; left:0; bottom:0; height:2px; width:100%;
+    background:rgba(255,255,255,.08); z-index:60; pointer-events:none;
+  }
+  #barFill{height:100%; width:0; background:rgba(255,255,255,.55)}
+  #beats{
+    position:fixed; right:18px; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:9px; z-index:60; pointer-events:none;
+  }
+  #beats i{
+    display:block; width:5px; height:5px; border-radius:50%;
+    background:rgba(255,255,255,.18); transition:background .25s ease, transform .25s ease;
+  }
+  #beats i.act{background:rgba(255,255,255,.85); transform:scale(1.5)}
+  @media (max-width:700px){ #beats{display:none} }
+</style>
+</head>
+<body>
+
+<div id="track">
+  <div id="viewport">
+    <div id="stage">
+      <!-- row order is left -> right : newest panel leads -->
+      <div class="panel" id="pB5" style="z-index:5"><img data-src="B5.png" alt=""></div>
+      <div class="panel" id="pB4" style="z-index:4"><img data-src="B4.png" alt=""></div>
+      <div class="panel" id="pB3" style="z-index:3"><img data-src="B3.png" alt=""></div>
+      <div class="panel" id="pB2" style="z-index:2"><img data-src="B2.png" alt=""></div>
+      <div class="panel" id="pB1" style="z-index:1"><img data-src="B1.png" alt=""></div>
+
+      <!-- B6 springs in from the right over everything, then pans off left
+           with B7 towed along behind it -->
+      <div class="panel" id="pRet"><img data-src="B6.png" alt=""></div>
+      <div class="panel" id="pB7"><img data-src="B7.png" alt=""></div>
+
+      <div class="sq" id="sqTop">
+        <img data-src="1.png" alt=""><img data-src="2.png" alt=""><img data-src="3.png" alt=""><img data-src="4.png" alt=""><img data-src="5.png" alt="">
+      </div>
+      <div class="sq" id="sqBot">
+        <img data-src="1.png" alt=""><img data-src="2.png" alt=""><img data-src="3.png" alt=""><img data-src="4.png" alt=""><img data-src="5.png" alt="">
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Point every image at the PNG sitting next to this file, with a fresh stamp so
+   the browser can't serve you a cached copy of art you've just repainted. */
+(function(){
+  var v = "?v=" + Date.now();
+  var imgs = document.querySelectorAll("img[data-src]");
+  for (var i=0;i<imgs.length;i++) imgs[i].src = imgs[i].getAttribute("data-src") + v;
+})();
+</script>
+<div id="hint">scroll</div>
+<div id="bar"><div id="barFill"></div></div>
+<div id="beats"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ======================================================================
+     TIMELINE  — everything is measured in "units". 1 unit = UNIT_VH of
+     viewport height of scrolling. Edit the numbers below to re-time the
+     piece; nothing else needs to change.
+     ====================================================================== */
+  const UNIT_VH = 64;
+
+  const T = {
+    holdA:   [0.0,  0.7],   // B1 alone
+    s0to1:   [0.7,  2.1],   // B2 pushes in
+    s1to2:   [2.5,  3.9],   // B3 pushes in
+    s2to3:   [4.3,  5.7],   // B4 displaces
+    s3to4:   [6.1,  7.5],   // B5 displaces
+    sqInT:   8.4,           // top square simply appears here
+    sqInB:   8.9,           // bottom square appears a beat later
+    /* one cut per square image: after the last one both squares are on the
+       final image. Add an <img> to both .sq blocks and a cut here to extend
+       the sequence — nothing else needs changing. */
+    cuts:    [9.6, 10.3, 11.0, 11.7, 12.4],
+    ret:     [12.85, 14.05],// B6 springs in from the right
+    close:   14.15,         // captions and squares start shutting
+    pan:     [14.35, 16.05],// B6 keeps going left, towing B7 into frame
+    total:   16.80
+  };
+
+  /* the shutters close in this order, each taking CLOSE_DUR units, offset by
+     CLOSE_STEP — the upper square (her face) is deliberately last to go */
+  const CLOSE_DUR = 0.55, CLOSE_STEP = 0.13;
+
+  /* Squares and captions appear rather than move. Raise these (in units) for a
+     short dissolve on arrival instead of a clean cut. */
+  const SQ_FADE = 0, CAP_FADE = 0;
+
+  /* ======================================================================
+     CAPTIONS — x/y/w are stage design units, `at` is the unit on the
+     timeline where the box appears. The first lands on the opening cut of
+     the square sequence, the last after both squares have reached image 4.
+     ====================================================================== */
+  const CAP_TOP = 131, CAP_GAP = 32;   // y of the first box, then an equal gap
+  const CAPTIONS = [
+    { x:535, w:403, at: 9.75,
+      html:'The daily commute across <i>Vansda</i><br>is always a breathtaking spectacle' },
+    { x:535, w:403, at:10.85,
+      html:'But work calls. the station is waiting,<br>and those K-7 Mechanical Gibbons<br>are overdue for maintenance.' },
+    { x:535, w:403, at:12.85,
+      html:'As lead Xenoprimatologist,<br>I have 14 Mech-Gibbons keeping<br>Earth&rsquo;s entire satellite network online.<br>Can&rsquo;t let them crash!' }
+  ];
+
+  /* ======================================================================
+     PANEL LAYOUT
+     Row order (left -> right) is  B5 B4 B3 B2 B1 : the newest panel leads.
+     Each state is a width vector in design units; x is the running sum, so
+     a panel whose width is still 0 sits at x=0 (waiting off the left edge)
+     and a panel pushed past 2048 has simply been shoved out of the frame.
+     ====================================================================== */
+  const W = 2048;
+  const LEAD = 1784, STRIP1 = 168, STRIP2 = 96;
+
+  const STATES = [
+    [   0,    0,    0,      0,   W ],                 // S0  B1 alone
+    [   0,    0,    0, W-STRIP1, STRIP1 ],            // S1  B2 in, B1 -> strip
+    [   0,    0, LEAD, STRIP1, STRIP2 ],              // S2  B3 in, both shrink
+    [   0, LEAD, STRIP1, STRIP2, STRIP2 ],            // S3  B4 in, B1 displaced out
+    [LEAD, STRIP1, STRIP2, STRIP2, STRIP2 ]           // S4  B5 in, B2 displaced out
+  ];
+
+  const panels = ["pB5","pB4","pB3","pB2","pB1"].map(id => document.getElementById(id));
+
+  /* ---- square overlay ---- */
+  const sqTop = document.getElementById("sqTop");
+  const sqBot = document.getElementById("sqBot");
+  const topImgs = Array.from(sqTop.children);
+  const botImgs = Array.from(sqBot.children);
+  const pRet = document.getElementById("pRet");
+  const pB7  = document.getElementById("pB7");
+  const SQ_N = topImgs.length;          // how many drawings the squares run through
+  const SQ_SIZE = parseFloat(getComputedStyle(document.documentElement)
+                    .getPropertyValue("--sq-size"));
+
+  /* build the caption boxes from the config above: an outer shutter with a
+     fixed-width inner block, so closing crops the text instead of reflowing it */
+  const capEls = CAPTIONS.map(c => {
+    const outer = document.createElement("div");
+    outer.className = "cap";
+    outer.style.left = c.x + "px";
+    outer.style.width = c.w + "px";
+    const inner = document.createElement("div");
+    inner.style.width = c.w + "px";
+    inner.innerHTML = c.html;
+    outer.appendChild(inner);
+    document.getElementById("stage").appendChild(outer);
+    return outer;
+  });
+
+  /* what closes, in what order, and how wide each one is when open */
+  const CLOSERS = [
+    {el: capEls[2], full: CAPTIONS[2].w},
+    {el: capEls[1], full: CAPTIONS[1].w},
+    {el: capEls[0], full: CAPTIONS[0].w},
+    {el: sqBot,     full: SQ_SIZE},
+    {el: sqTop,     full: SQ_SIZE}
+  ];
+
+  /* ---- helpers ---- */
+  const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+  const seg = (u,a,b) => clamp((u-a)/(b-a),0,1);
+
+  /* Step response of a lightly damped second-order system: starts from rest,
+     drives the panel home, overshoots by ~6% and settles. This is what gives
+     the push its recoil — the incoming frame shoves a little too far and the
+     squeezed frame springs back out. Raise ZETA for a stiffer, flatter push;
+     lower it for more wobble. */
+  const ZETA = 0.667, OMEGA = 11, WD = OMEGA * Math.sqrt(1 - ZETA*ZETA);
+  function springRaw(t){
+    return 1 - Math.exp(-ZETA*OMEGA*t) * (Math.cos(WD*t) + (ZETA*OMEGA/WD)*Math.sin(WD*t));
+  }
+  const SPRING_NORM = springRaw(1);
+  function ease(t){
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    return springRaw(t) / SPRING_NORM;
+  }
+
+  /* plain easeInOutCubic — used for the shutters, where an overshoot would
+     just mean clamping at zero anyway */
+  function easeIO(t){
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+  }
+
+  /* ======================================================================
+     RENDER
+     ====================================================================== */
+  const stage = document.getElementById("stage");
+  const track = document.getElementById("track");
+  const viewportEl = document.getElementById("viewport");
+  const barFill = document.getElementById("barFill");
+  const hint = document.getElementById("hint");
+
+  const beatsEl = document.getElementById("beats");
+  const BEAT_MARKS = [0.2, 1.9, 3.7, 5.5, 7.3, 8.9, 9.75, 10.85, 12.4, 12.85, 14.3, 16.2];
+  BEAT_MARKS.forEach(()=>beatsEl.appendChild(document.createElement("i")));
+  const beatDots = Array.from(beatsEl.children);
+
+  let vh = 1, trackPx = 1, lastU = -1, lastTopI = -1, lastBotI = -1;
+
+  /* stack the caption boxes from CAP_TOP with an identical gap between each,
+     measured off the rendered text so the spacing is exact whatever the font */
+  function layoutCaptions(){
+    let y = CAP_TOP;
+    for (let i=0;i<capEls.length;i++){
+      capEls[i].style.top = y + "px";
+      y += capEls[i].firstChild.offsetHeight + CAP_GAP;
+    }
+  }
+
+  function fit(){
+    layoutCaptions();
+    const w = window.innerWidth, h = window.innerHeight;
+    vh = h;
+    viewportEl.style.height = h + "px";
+    const s = Math.min(w/W, h/895);
+    stage.style.transform = "translateZ(0) scale(" + s + ")";
+    track.style.height = (T.total * UNIT_VH/100 * h + h) + "px";
+    trackPx = track.offsetHeight - h;
+    lastU = -1;
+    draw();
+  }
+
+  function widthsAt(u){
+    // find which transition u falls in, and blend the two state vectors
+    let a = 0, b = 0, t = 0;
+    if (u < T.s0to1[0])        { a=0; b=0; t=0; }
+    else if (u < T.s0to1[1])   { a=0; b=1; t=seg(u,T.s0to1[0],T.s0to1[1]); }
+    else if (u < T.s1to2[0])   { a=1; b=1; t=0; }
+    else if (u < T.s1to2[1])   { a=1; b=2; t=seg(u,T.s1to2[0],T.s1to2[1]); }
+    else if (u < T.s2to3[0])   { a=2; b=2; t=0; }
+    else if (u < T.s2to3[1])   { a=2; b=3; t=seg(u,T.s2to3[0],T.s2to3[1]); }
+    else if (u < T.s3to4[0])   { a=3; b=3; t=0; }
+    else if (u < T.s3to4[1])   { a=3; b=4; t=seg(u,T.s3to4[0],T.s3to4[1]); }
+    else                       { a=4; b=4; t=0; }
+
+    const e = ease(t), A = STATES[a], B = STATES[b], out = [];
+    let enter = -1;
+    for (let i=0;i<5;i++){
+      out[i] = A[i] + (B[i]-A[i])*e;
+      if (A[i] === 0 && B[i] > 0) enter = i;   // the frame doing the pushing
+    }
+    return {w: out, enter: enter, target: enter < 0 ? 0 : STATES[b][enter]};
+  }
+
+  function draw(){
+    const u = clamp(window.scrollY / trackPx, 0, 1) * T.total;
+    if (Math.abs(u-lastU) < 0.0004) return;
+    lastU = u;
+
+    /* --- background row ---
+       The row is laid out by cumulative width, so an older frame is shoved
+       bodily to the right and clipped by the stage edge — a real push.
+       The frame that is arriving is the exception: it keeps its full final
+       width and enters from off-frame left, so you see a whole card slide in
+       rather than one uncovering itself in place. Once it is all the way in
+       (and during the spring's overshoot) it just fills the space it won. */
+    const L = widthsAt(u), w = L.w;
+    let x = 0;
+    for (let i=0;i<5;i++){
+      const p = panels[i];
+      let rw = w[i], rx = x;
+      if (i === L.enter){
+        rw = Math.max(L.target, w[i]);
+        rx = x + w[i] - rw;
+      }
+      p.style.transform = "translate3d(" + rx.toFixed(2) + "px,0,0)";
+      p.style.width = rw.toFixed(2) + "px";
+      p.style.visibility = w[i] < 0.6 ? "hidden" : "visible";
+      x += w[i];
+    }
+
+    /* --- square overlay : appears in place, no travel --- */
+    sqTop.style.opacity = SQ_FADE > 0 ? seg(u, T.sqInT, T.sqInT + SQ_FADE) : (u >= T.sqInT ? 1 : 0);
+    sqBot.style.opacity = SQ_FADE > 0 ? seg(u, T.sqInB, T.sqInB + SQ_FADE) : (u >= T.sqInB ? 1 : 0);
+
+    let step = 0;
+    for (let i=0;i<T.cuts.length;i++) if (u >= T.cuts[i]) step = i+1;
+    const topI = Math.min(step, SQ_N-1);
+    const botI = clamp(step-1, 0, SQ_N-1);
+    if (topI !== lastTopI){ topImgs.forEach((im,i)=>im.classList.toggle("on", i===topI)); lastTopI = topI; }
+    if (botI !== lastBotI){ botImgs.forEach((im,i)=>im.classList.toggle("on", i===botI)); lastBotI = botI; }
+
+    /* --- captions : appear in place, one after another --- */
+    for (let i=0;i<capEls.length;i++){
+      const at = CAPTIONS[i].at;
+      capEls[i].style.opacity = CAP_FADE > 0 ? seg(u, at, at + CAP_FADE) : (u >= at ? 1 : 0);
+    }
+
+    /* --- the shutters : captions and squares close left-to-right, in turn --- */
+    for (let i=0;i<CLOSERS.length;i++){
+      const c = CLOSERS[i], t0 = T.close + i*CLOSE_STEP;
+      c.el.style.width = (c.full * (1 - easeIO(seg(u, t0, t0 + CLOSE_DUR)))).toFixed(2) + "px";
+    }
+
+    /* --- B6 springs in from the right, then keeps going left towing B7 ---
+       On the way in, width grows past the stage during the spring's overshoot
+       and the left edge goes negative, so the right edge stays pinned at 2048
+       and nothing is uncovered; the oversized image absorbs the extra. B7 is
+       laid out one stage-width behind B6 and uses the same trick on arrival. */
+    if (u >= T.ret[0]){
+      const arr = W * ease(seg(u, T.ret[0], T.ret[1]));    // distance travelled in
+      /* the pan is a pull, not a shove: easeIO spreads the travel evenly over
+         its whole scroll segment and, having no overshoot, keeps B7 covering
+         the right edge without needing an oversized image */
+      const off = -W * easeIO(seg(u, T.pan[0], T.pan[1]));  // how far the pair has slid left
+      pRet.style.visibility = "visible";
+      pRet.style.width = Math.max(W, arr).toFixed(2) + "px";
+      pRet.style.transform = "translate3d(" + (W - arr + off).toFixed(2) + "px,0,0)";
+
+      if (off < 0){
+        pB7.style.visibility = "visible";
+        pB7.style.width = Math.max(W, -off).toFixed(2) + "px";
+        pB7.style.transform = "translate3d(" + (W + off).toFixed(2) + "px,0,0)";
+      } else if (pB7.style.visibility !== "hidden"){
+        pB7.style.visibility = "hidden";          // and park it back off-stage right
+        pB7.style.width = W + "px";
+        pB7.style.transform = "translate3d(" + W + "px,0,0)";
+      }
+    } else if (pRet.style.visibility !== "hidden"){
+      pRet.style.visibility = "hidden";
+      pB7.style.visibility = "hidden";
+    }
+
+    /* --- chrome --- */
+    const prog = u / T.total;
+    barFill.style.width = (prog*100).toFixed(2) + "%";
+    hint.style.opacity = u > 0.25 ? 0 : 1;
+    let act = 0;
+    for (let i=0;i<BEAT_MARKS.length;i++) if (u >= BEAT_MARKS[i]-0.35) act = i;
+    beatDots.forEach((d,i)=>d.classList.toggle("act", i===act));
+  }
+
+  let ticking = false;
+  function onScroll(){
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(()=>{ ticking = false; draw(); });
+  }
+
+  window.addEventListener("scroll", onScroll, {passive:true});
+  window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", fit);
+  fit();
+  // second pass once webfonts / layout settle
+  requestAnimationFrame(fit);
+})();
+</script>
+</body>
+</html>
