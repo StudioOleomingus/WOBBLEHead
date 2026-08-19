@@ -118,8 +118,11 @@
      Everything else on the page keeps images at exact stage size. */
   #pRet{z-index:20; visibility:hidden}
   #pRet > img{ width:2210px; height:966px; top:-40px; left:0 }
-  /* B7 is towed in on a plain ease with no overshoot, so it needs no oversize */
-  #pB7{z-index:21; visibility:hidden; width:2048px; transform:translate3d(2048px,0,0)}
+  /* the towed panels ride on a plain ease with no overshoot, so unlike B6 they
+     need no oversized image — each is parked one stage-width further right */
+  #pB7, #pB8{visibility:hidden; width:2048px}
+  #pB7{z-index:21; transform:translate3d(2048px,0,0)}
+  #pB8{z-index:22; transform:translate3d(4096px,0,0)}
 
   /* ---- chrome ---- */
   #hint{
@@ -157,9 +160,10 @@
       <div class="panel" id="pB1" style="z-index:1"><img data-src="B1.png" alt=""></div>
 
       <!-- B6 springs in from the right over everything, then pans off left
-           with B7 towed along behind it -->
+           with B7 and B8 towed along behind it, one stage-width apart -->
       <div class="panel" id="pRet"><img data-src="B6.png" alt=""></div>
       <div class="panel" id="pB7"><img data-src="B7.png" alt=""></div>
+      <div class="panel" id="pB8"><img data-src="B8.png" alt=""></div>
 
       <div class="sq" id="sqTop">
         <img data-src="1.png" alt=""><img data-src="2.png" alt=""><img data-src="3.png" alt=""><img data-src="4.png" alt=""><img data-src="5.png" alt="">
@@ -197,20 +201,24 @@
 
   const T = {
     holdA:   [0.0,  0.7],   // B1 alone
-    s0to1:   [0.7,  2.1],   // B2 pushes in
-    s1to2:   [2.5,  3.9],   // B3 pushes in
-    s2to3:   [4.3,  5.7],   // B4 displaces
-    s3to4:   [6.1,  7.5],   // B5 displaces
-    sqInT:   8.4,           // top square simply appears here
-    sqInB:   8.9,           // bottom square appears a beat later
+    s0to1:   [0.7,  2.6],   // B2 pushes in
+    s1to2:   [3.0,  4.9],   // B3 pushes in
+    s2to3:   [5.3,  7.2],   // B4 displaces
+    s3to4:   [7.6,  9.5],   // B5 displaces
+    sqInT:   10.3,          // top square simply appears here
+    sqInB:   10.8,          // bottom square appears a beat later
     /* one cut per square image: after the last one both squares are on the
        final image. Add an <img> to both .sq blocks and a cut here to extend
        the sequence — nothing else needs changing. */
-    cuts:    [9.6, 10.3, 11.0, 11.7, 12.4],
-    ret:     [12.85, 14.05],// B6 springs in from the right
-    close:   14.15,         // captions and squares start shutting
-    pan:     [14.35, 16.05],// B6 keeps going left, towing B7 into frame
-    total:   16.80
+    cuts:    [11.5, 12.2, 12.9, 13.6, 14.3],
+    ret:     [14.75, 16.75],// B6 springs in from the right
+    close:   16.85,         // captions and squares start shutting
+    /* each leg of the pull drags the tow one stage-width further left:
+       leg 1 lands on B7, a beat's rest, then leg 2 lands on B8. Add another
+       leg here and another panel to the tow to keep going. */
+    pan:     [17.05, 18.95],
+    pan2:    [19.55, 21.45],
+    total:   22.20
   };
 
   /* the shutters close in this order, each taking CLOSE_DUR units, offset by
@@ -228,11 +236,11 @@
      ====================================================================== */
   const CAP_TOP = 131, CAP_GAP = 32;   // y of the first box, then an equal gap
   const CAPTIONS = [
-    { x:535, w:403, at: 9.75,
+    { x:535, w:403, at:11.65,
       html:'The daily commute across <i>Vansda</i><br>is always a breathtaking spectacle' },
-    { x:535, w:403, at:10.85,
+    { x:535, w:403, at:12.75,
       html:'But work calls. the station is waiting,<br>and those K-7 Mechanical Gibbons<br>are overdue for maintenance.' },
-    { x:535, w:403, at:12.85,
+    { x:535, w:403, at:14.75,
       html:'As lead Xenoprimatologist,<br>I have 14 Mech-Gibbons keeping<br>Earth&rsquo;s entire satellite network online.<br>Can&rsquo;t let them crash!' }
   ];
 
@@ -262,7 +270,8 @@
   const topImgs = Array.from(sqTop.children);
   const botImgs = Array.from(sqBot.children);
   const pRet = document.getElementById("pRet");
-  const pB7  = document.getElementById("pB7");
+  /* the tow, in order behind B6 — index i sits (i+1) stage-widths back */
+  const TOW = [document.getElementById("pB7"), document.getElementById("pB8")];
   const SQ_N = topImgs.length;          // how many drawings the squares run through
   const SQ_SIZE = parseFloat(getComputedStyle(document.documentElement)
                     .getPropertyValue("--sq-size"));
@@ -298,9 +307,18 @@
   /* Step response of a lightly damped second-order system: starts from rest,
      drives the panel home, overshoots by ~6% and settles. This is what gives
      the push its recoil — the incoming frame shoves a little too far and the
-     squeezed frame springs back out. Raise ZETA for a stiffer, flatter push;
-     lower it for more wobble. */
-  const ZETA = 0.667, OMEGA = 11, WD = OMEGA * Math.sqrt(1 - ZETA*ZETA);
+     squeezed frame springs back out.
+
+     ZETA sets how much it overshoots (only ZETA — OMEGA doesn't affect it):
+     raise for a stiffer, flatter push, lower for more wobble.
+     OMEGA sets how quickly it gets there, i.e. how much of the scroll segment
+     the movement actually occupies. At 11 the panel was 99% home by a quarter
+     of the way through its segment, which is what made the slide feel abrupt;
+     at 7 the travel spreads across most of the segment and the peak speed is
+     less than half. Below about 8.4 the spring can no longer fully settle
+     within the segment, so 7 is near the gentle limit — go lower and it will
+     still be drifting when the hold begins. */
+  const ZETA = 0.667, OMEGA = 7, WD = OMEGA * Math.sqrt(1 - ZETA*ZETA);
   function springRaw(t){
     return 1 - Math.exp(-ZETA*OMEGA*t) * (Math.cos(WD*t) + (ZETA*OMEGA/WD)*Math.sin(WD*t));
   }
@@ -329,11 +347,22 @@
   const hint = document.getElementById("hint");
 
   const beatsEl = document.getElementById("beats");
-  const BEAT_MARKS = [0.2, 1.9, 3.7, 5.5, 7.3, 8.9, 9.75, 10.85, 12.4, 12.85, 14.3, 16.2];
+  const BEAT_MARKS = [0.2, 2.4, 4.7, 7.0, 9.3, 10.8, 11.65, 12.75, 14.3, 14.75,
+                      17.0, 19.2, 20.5, 21.9];
   BEAT_MARKS.forEach(()=>beatsEl.appendChild(document.createElement("i")));
   const beatDots = Array.from(beatsEl.children);
 
   let vh = 1, trackPx = 1, lastU = -1, lastTopI = -1, lastBotI = -1;
+
+  /* A mouse wheel arrives in fat discrete notches, so binding the artwork
+     straight to scrollY makes every notch a jump. Instead the rendered
+     position chases the scroll position, closing SMOOTH of the remaining gap
+     each frame — the notch becomes a short glide. Set SMOOTH to 1 to bind
+     directly again; lower it for more float. */
+  const SMOOTH = 0.12;
+  let uCur = 0, rafId = null;
+
+  function targetU(){ return clamp(window.scrollY / trackPx, 0, 1) * T.total; }
 
   /* stack the caption boxes from CAP_TOP with an identical gap between each,
      measured off the rendered text so the spacing is exact whatever the font */
@@ -355,7 +384,8 @@
     track.style.height = (T.total * UNIT_VH/100 * h + h) + "px";
     trackPx = track.offsetHeight - h;
     lastU = -1;
-    draw();
+    uCur = targetU();
+    draw(uCur);
   }
 
   function widthsAt(u){
@@ -380,8 +410,7 @@
     return {w: out, enter: enter, target: enter < 0 ? 0 : STATES[b][enter]};
   }
 
-  function draw(){
-    const u = clamp(window.scrollY / trackPx, 0, 1) * T.total;
+  function draw(u){
     if (Math.abs(u-lastU) < 0.0004) return;
     lastU = u;
 
@@ -437,26 +466,30 @@
        laid out one stage-width behind B6 and uses the same trick on arrival. */
     if (u >= T.ret[0]){
       const arr = W * ease(seg(u, T.ret[0], T.ret[1]));    // distance travelled in
-      /* the pan is a pull, not a shove: easeIO spreads the travel evenly over
-         its whole scroll segment and, having no overshoot, keeps B7 covering
-         the right edge without needing an oversized image */
-      const off = -W * easeIO(seg(u, T.pan[0], T.pan[1]));  // how far the pair has slid left
+      /* the pull is a pull, not a shove: easeIO spreads the travel evenly over
+         its scroll segment and, having no overshoot, guarantees the trailing
+         panel of the tow always reaches the right edge of the stage. Each leg
+         drags everything one more stage-width to the left. */
+      const off = -W * (easeIO(seg(u, T.pan[0],  T.pan[1]))
+                      + easeIO(seg(u, T.pan2[0], T.pan2[1])));
+
       pRet.style.visibility = "visible";
       pRet.style.width = Math.max(W, arr).toFixed(2) + "px";
       pRet.style.transform = "translate3d(" + (W - arr + off).toFixed(2) + "px,0,0)";
 
-      if (off < 0){
-        pB7.style.visibility = "visible";
-        pB7.style.width = Math.max(W, -off).toFixed(2) + "px";
-        pB7.style.transform = "translate3d(" + (W + off).toFixed(2) + "px,0,0)";
-      } else if (pB7.style.visibility !== "hidden"){
-        pB7.style.visibility = "hidden";          // and park it back off-stage right
-        pB7.style.width = W + "px";
-        pB7.style.transform = "translate3d(" + W + "px,0,0)";
+      for (let i=0;i<TOW.length;i++){
+        const el = TOW[i], x = (i+1)*W + off;
+        if (x < W - 0.5){                          // has any of it entered frame?
+          el.style.visibility = "visible";
+          el.style.transform = "translate3d(" + x.toFixed(2) + "px,0,0)";
+        } else if (el.style.visibility !== "hidden"){
+          el.style.visibility = "hidden";          // park it back off-stage right
+          el.style.transform = "translate3d(" + ((i+1)*W) + "px,0,0)";
+        }
       }
     } else if (pRet.style.visibility !== "hidden"){
       pRet.style.visibility = "hidden";
-      pB7.style.visibility = "hidden";
+      for (let i=0;i<TOW.length;i++) TOW[i].style.visibility = "hidden";
     }
 
     /* --- chrome --- */
@@ -468,12 +501,17 @@
     beatDots.forEach((d,i)=>d.classList.toggle("act", i===act));
   }
 
-  let ticking = false;
-  function onScroll(){
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(()=>{ ticking = false; draw(); });
+  /* keep stepping until the rendered position has caught up with the scroll
+     position, then let the loop go back to sleep */
+  function tick(){
+    const uT = targetU();
+    uCur += (uT - uCur) * SMOOTH;
+    const settled = Math.abs(uT - uCur) < 0.0008;
+    if (settled) uCur = uT;
+    draw(uCur);
+    rafId = settled ? null : requestAnimationFrame(tick);
   }
+  function onScroll(){ if (rafId === null) rafId = requestAnimationFrame(tick); }
 
   window.addEventListener("scroll", onScroll, {passive:true});
   window.addEventListener("resize", fit);
